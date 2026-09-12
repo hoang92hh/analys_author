@@ -1,0 +1,8 @@
+# Các đường dẫn tương đối được resolve từ thư mục gốc project analys.
+content_a: reference/oldContent.txt
+content_b: reference/newContent.txt
+criteria: criteria/DEFAULT_CRITERIA.xlsx
+criteria_payload: output/criteria_payload.json
+analysis_results: output/analysis_results.json
+output: output/result_analysis.xlsx
+result_column: Result

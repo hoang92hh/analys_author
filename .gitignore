@@ -1,0 +1,5 @@
+# Temporary spreadsheet files
+/.tmp_spreadsheet/
+
+# Generated analysis output
+/output/

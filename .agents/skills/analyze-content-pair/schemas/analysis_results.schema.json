@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "analysis_results.schema.json",
+  "title": "Analyze Content Pair Results",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "results"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["criterion_key", "criterion_id", "result"],
+        "properties": {
+          "criterion_key": {"type": "string", "minLength": 1},
+          "criterion_id": {"type": "string", "minLength": 1},
+          "result": {"type": "string"}
+        }
+      }
+    }
+  }
+}
