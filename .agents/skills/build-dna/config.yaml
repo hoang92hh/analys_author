@@ -1,0 +1,5 @@
+# Resolve đường dẫn từ project root analys.
+input: output/result_analysis.xlsx
+grouped_payload: output/dna_grouped_payload.json
+dna_results: output/dna_results.json
+output: output/AUTHOR_DNA.xlsx
