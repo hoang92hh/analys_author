@@ -1,20 +1,47 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Per-criterion DNA decisions",
+  "title": "Pattern review and one merged DNA result per criterion",
+  "description": "Internal review 3.0. Excel contract remains AUTHOR_DNA.xlsx / AUTHOR_DNA / four columns / one row per Cxx. dna_bridge.py also validates exact corpus coverage, same-criterion quotes, assessed eligibility arithmetic, singleton levels, reconcile links and merge coverage.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schema_version",
     "payload_digest",
+    "metadata",
     "criteria"
   ],
   "properties": {
     "schema_version": {
-      "const": "1.0"
+      "const": "3.0"
     },
     "payload_digest": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "corpus_scope",
+        "limitations",
+        "reconciliation_completed",
+        "merge_completed"
+      ],
+      "properties": {
+        "corpus_scope": {
+          "type": "string",
+          "minLength": 1
+        },
+        "limitations": {
+          "type": "string"
+        },
+        "reconciliation_completed": {
+          "const": true
+        },
+        "merge_completed": {
+          "const": true
+        }
+      }
     },
     "criteria": {
       "type": "array",
@@ -24,167 +51,370 @@
         "additionalProperties": false,
         "required": [
           "criterion_id",
-          "decision",
           "synthesis",
-          "confidence",
-          "evidence",
-          "filter_reason",
-          "when",
-          "action",
-          "selection",
-          "validation",
-          "condition_variation",
-          "target_step"
+          "patterns",
+          "dna_result"
         ],
         "properties": {
           "criterion_id": {
             "type": "string",
             "pattern": "^C[0-9]+$"
           },
-          "decision": {
-            "enum": [
-              "keep",
-              "drop"
-            ]
-          },
           "synthesis": {
             "type": "string",
             "minLength": 1
           },
-          "confidence": {
-            "enum": [
-              "High",
-              "Medium",
-              "Low"
-            ]
-          },
-          "evidence": {
+          "patterns": {
             "type": "array",
             "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "part_id",
-                "result_excerpt",
-                "role"
-              ],
-              "properties": {
-                "part_id": {
-                  "type": "string",
-                  "pattern": "^Part[1-9][0-9]*$"
-                },
-                "result_excerpt": {
-                  "type": "string",
-                  "minLength": 1
-                },
-                "role": {
-                  "enum": [
-                    "support",
-                    "variation",
-                    "exception",
-                    "unresolved"
-                  ]
-                }
-              }
+              "$ref": "#/$defs/pattern"
             }
           },
-          "filter_reason": {
-            "type": "string"
-          },
-          "when": {
-            "type": "string"
-          },
-          "action": {
-            "type": "string"
-          },
-          "selection": {
-            "type": "string"
-          },
-          "validation": {
-            "type": "string"
-          },
-          "condition_variation": {
-            "type": "string"
-          },
-          "target_step": {
-            "type": "string"
+          "dna_result": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/$defs/merged"
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "pattern": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pattern_id",
+        "observation",
+        "status",
+        "confidence",
+        "frequency",
+        "level",
+        "eligible_parts",
+        "assessed_eligible_parts",
+        "supporting_parts",
+        "unknown_occurrence_parts",
+        "part_assessments",
+        "evidence",
+        "condition",
+        "action",
+        "filter_reason",
+        "redundant_with",
+        "conflicts_with",
+        "reconcile_note"
+      ],
+      "properties": {
+        "pattern_id": {
+          "type": "string",
+          "pattern": "^C[0-9]+\\.P[0-9]{2,}$"
+        },
+        "observation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "keep",
+            "drop"
+          ]
+        },
+        "confidence": {
+          "enum": [
+            "High",
+            "Medium",
+            "Low"
+          ]
+        },
+        "frequency": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "numerator",
+            "denominator",
+            "ratio"
+          ],
+          "properties": {
+            "numerator": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "denominator": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "ratio": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1
+            }
           }
         },
-        "allOf": [
-          {
-            "if": {
-              "properties": {
-                "decision": {
-                  "const": "keep"
-                }
+        "level": {
+          "enum": [
+            "CORE",
+            "DEFAULT",
+            "COMMON",
+            "POSSIBLE",
+            "INSTANCE_SPECIFIC",
+            "UNASSESSED"
+          ]
+        },
+        "eligible_parts": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^Part[1-9][0-9]*$"
+          }
+        },
+        "assessed_eligible_parts": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^Part[1-9][0-9]*$"
+          }
+        },
+        "supporting_parts": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^Part[1-9][0-9]*$"
+          }
+        },
+        "unknown_occurrence_parts": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^Part[1-9][0-9]*$"
+          }
+        },
+        "part_assessments": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/assessment"
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        },
+        "condition": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string"
+        },
+        "filter_reason": {
+          "type": "string"
+        },
+        "redundant_with": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^C[0-9]+\\.P[0-9]{2,}$"
+          }
+        },
+        "conflicts_with": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^C[0-9]+\\.P[0-9]{2,}$"
+          }
+        },
+        "reconcile_note": {
+          "type": "string"
+        },
+        "selection": {
+          "type": "string"
+        },
+        "validation": {
+          "type": "string"
+        },
+        "limitations": {
+          "type": "string"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "keep"
               }
-            },
-            "then": {
-              "properties": {
-                "confidence": {
-                  "enum": [
-                    "High",
-                    "Medium"
-                  ]
-                },
-                "evidence": {
-                  "minItems": 2
-                },
-                "filter_reason": {
-                  "const": ""
-                },
-                "when": {
-                  "minLength": 1
-                },
-                "action": {
-                  "minLength": 1
-                },
-                "selection": {
-                  "minLength": 1
-                },
-                "validation": {
-                  "minLength": 1
-                },
-                "condition_variation": {
-                  "minLength": 1
-                },
-                "target_step": {
-                  "enum": [
-                    "STEP 1",
-                    "STEP 2",
-                    "STEP 3",
-                    "STEP 4"
-                  ]
-                }
+            }
+          },
+          "then": {
+            "properties": {
+              "action": {
+                "type": "string",
+                "minLength": 1
+              },
+              "confidence": {
+                "enum": [
+                  "High",
+                  "Medium"
+                ]
+              },
+              "filter_reason": {
+                "const": ""
+              },
+              "supporting_parts": {
+                "minItems": 1
+              },
+              "level": {
+                "enum": [
+                  "CORE",
+                  "DEFAULT",
+                  "COMMON",
+                  "POSSIBLE"
+                ]
               }
-            },
-            "else": {
-              "properties": {
-                "filter_reason": {
-                  "minLength": 1
-                },
-                "when": {
-                  "const": ""
-                },
-                "action": {
-                  "const": ""
-                },
-                "selection": {
-                  "const": ""
-                },
-                "validation": {
-                  "const": ""
-                },
-                "condition_variation": {
-                  "const": ""
-                },
-                "target_step": {
-                  "const": ""
-                }
+            }
+          },
+          "else": {
+            "properties": {
+              "filter_reason": {
+                "type": "string",
+                "minLength": 1
               }
             }
           }
-        ]
+        }
+      ]
+    },
+    "assessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "part_id",
+        "eligibility",
+        "occurrence",
+        "reason"
+      ],
+      "properties": {
+        "part_id": {
+          "type": "string",
+          "pattern": "^Part[1-9][0-9]*$"
+        },
+        "eligibility": {
+          "enum": [
+            "eligible",
+            "ineligible",
+            "unknown"
+          ]
+        },
+        "occurrence": {
+          "enum": [
+            "present",
+            "absent",
+            "unknown"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "eligibility": {
+                "enum": [
+                  "ineligible",
+                  "unknown"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "occurrence": {
+                "const": "unknown"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "part_id",
+        "result_excerpt",
+        "role"
+      ],
+      "properties": {
+        "part_id": {
+          "type": "string",
+          "pattern": "^Part[1-9][0-9]*$"
+        },
+        "result_excerpt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "enum": [
+            "support",
+            "eligible",
+            "ineligible",
+            "counterexample",
+            "condition",
+            "unresolved"
+          ]
+        }
+      }
+    },
+    "merged": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pattern_ids",
+        "action"
+      ],
+      "properties": {
+        "pattern_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^C[0-9]+\\.P[0-9]{2,}$"
+          },
+          "minItems": 1
+        },
+        "action": {
+          "type": "string",
+          "minLength": 1
+        },
+        "when": {
+          "type": "string"
+        },
+        "selection": {
+          "type": "string"
+        },
+        "validation": {
+          "type": "string"
+        },
+        "condition_variation": {
+          "type": "string"
+        }
       }
     }
   }
