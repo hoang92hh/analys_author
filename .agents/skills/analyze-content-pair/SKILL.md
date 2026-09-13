@@ -1,25 +1,29 @@
 ---
 name: analyze-content-pair
-description: Phân tích một hoặc nhiều cặp Content Aᵢ → Content Bᵢ theo từng criterion trong DEFAULT_CRITERIA.xlsx để tạo Result trung gian có thể tái sử dụng; Python phụ trách Excel và validation, còn LLM chỉ suy ra quy luật từ dataset. Dùng khi tạo hoặc cập nhật result_analysis.xlsx, không dùng để tạo AUTHOR_SKILL cuối cùng.
+description: Phân tích độc lập từng cặp Content A.Part_i → Content B.Part_i theo Requirement và Analysis Instruction trong DEFAULT_CRITERIA.xlsx; xuất result_analysis.xlsx với một sheet mỗi Part và đầy đủ criteria từ master. Dùng để tạo hoặc cập nhật bảng phân tích từng đối tượng, không tổng hợp phong cách giữa các Part hoặc tạo AUTHOR_SKILL.
 ---
 
 # Analyze Content Pair
 
-Phân tích toàn bộ dataset `Content Aᵢ ↔ Content Bᵢ` để trả lời, với từng criterion: **“Tác giả triển khai criterion này như thế nào khi biến A thành B?”**
+**1 Part = 1 đối tượng = 1 bài phân tích A→B hoàn chỉnh = 1 sheet kết quả.**
 
-Đầu ra là các `Result` trung gian để bước sau tổng hợp thành transformation DNA. Không tạo `AUTHOR_SKILL` hoặc AUTHOR DNA cuối cùng trong workflow này.
+Flow: `PREPARE → ANALYZE EACH PART → WRITE RESULT → EXPORT`.
 
-Python sở hữu toàn bộ thao tác Excel, ánh xạ và lọc. LLM chỉ đọc dữ liệu và tạo JSON có định danh; không trực tiếp tạo, sửa hoặc lưu workbook.
+Mỗi criterion tạo một Result riêng cho Part hiện tại. Không tham chiếu Part khác, không tính frequency, không nhóm pattern xuyên Part và không tổng quát hóa thành AUTHOR_SKILL. Các sheet là đầu vào cho bước tổng hợp riêng sau này.
 
-## Cấu hình và ranh giới dữ liệu
+Python đọc, ghép Part và xuất Excel. LLM phân tích nội dung và ghi Result vào JSON; không tự tạo hoặc sửa workbook.
 
-Đọc [config.yaml](config.yaml). Resolve đường dẫn tương đối từ thư mục gốc project, trừ khi người dùng ghi đè trong yêu cầu hiện tại. Không sửa `content_a`, `content_b` hoặc `criteria`.
+## Cấu hình, evidence và công cụ
 
-Chỉ dùng Content A, Content B và `criteria_payload` làm evidence. Không dùng web hay external knowledge để bổ sung, xác minh, giải thích hoặc suy ra transformation DNA. Nếu B chứa thông tin không có trong A, chỉ nhận diện loại nội dung mới quan sát được; không nghiên cứu thêm fact đó.
+Đọc [config.yaml](config.yaml); resolve đường dẫn từ project root, trừ khi người dùng chỉ định config khác. Không sửa `content_a`, `content_b` hoặc `criteria`. Không dùng Result cũ làm evidence mới.
 
-## Workflow bắt buộc
+Chỉ dùng A.Part hiện tại, B.Part hiện tại và hướng dẫn criteria. Không dùng web hoặc knowledge bên ngoài để bổ sung, xác minh hay giải thích facts. Nội dung B không có trong A chỉ được nhận diện là bổ sung quan sát được, không được coi là fact đã xác minh.
 
-### 1. PREPARE — Python đọc Excel
+**Không được tạo thêm script, helper file, utility hoặc workflow trung gian trong quá trình thực thi. Chỉ được sử dụng các script đã tồn tại trong thư mục `scripts/`. Mọi phép phân tích, so sánh và đo lường phục vụ criterion phải được thực hiện trực tiếp trong quá trình phân tích, trừ khi script được định nghĩa sẵn trong skill.**
+
+Payload, JSON Result và workbook được định nghĩa trong config là các artifact của flow này.
+
+## 1. PREPARE
 
 Từ thư mục gốc project, chạy:
 
@@ -27,119 +31,73 @@ Từ thư mục gốc project, chạy:
 python .agents/skills/analyze-content-pair/scripts/excel_bridge.py prepare --config .agents/skills/analyze-content-pair/config.yaml
 ```
 
-Script đọc criteria theo đúng thứ tự workbook, không sửa file nguồn, và tạo `criteria_payload`. Mỗi dòng có `criterion_key` dạng `<sheet>!<row>:<criterion_id>` cùng `criterion_id`, `sheet`, `row`, `group`, `criterion` và `requirement`.
+Python đọc đầy đủ A, B và workbook, tách marker Part, ghép theo Part ID và sắp xếp theo số Part. Nếu thiếu đối ứng, trùng ID, Part rỗng, thiếu marker hoặc có nội dung ngoài Part, báo lỗi thay vì ghép cưỡng ép hoặc bỏ nội dung.
 
-Nếu thiếu file đầu vào, ID trống/trùng, schema cột sai hoặc không có đúng một sheet criteria chứa `result_column`, dừng và báo lỗi. Không tự thay thế file hoặc cột khác.
+`DEFAULT_CRITERIA.xlsx` là nguồn chuẩn: xử lý đầy đủ tất cả criteria có trong master theo đúng thứ tự, không cố định số lượng. Workbook có một sheet criteria với header `ID`, `Nhóm`, `Tiêu chí`, `Requirement`, `Analysis Instruction`, `Result`; dòng hoàn toàn trống không phải criterion.
 
-### 2. LLM ANALYSIS — chỉ phân tích nội dung
+Đọc payload tại `criteria_payload` trong config để nắm các cặp Part và toàn bộ criteria. Nếu A/B của một Part không cùng đối tượng hoặc không tương ứng rõ, dừng và báo cặp cần review.
 
-Đọc đầy đủ Content A, Content B và toàn bộ `criteria_payload`. Nhận diện các segment tương ứng `Aᵢ → Bᵢ`; chỉ ghép cặp khi quan hệ đủ rõ, không ghép cưỡng ép. Với mỗi criterion, phân tích tất cả cặp áp dụng được rồi tạo **một Result tổng hợp**, không tạo Result riêng cho từng cặp.
+## 2. ANALYZE EACH PART
 
-#### Taxonomy biến đổi A → B
+Hoàn thành toàn bộ Result của một Part trước khi chuyển sang Part tiếp theo:
 
-Khi criterion liên quan đến source mapping, coverage, transformation hoặc enrichment, phân biệt bốn trạng thái loại trừ nhau ở cấp semantic fact/proposition/idea unit:
+```text
+FOR EACH PART trong payload.parts:
+    Đọc đầy đủ A.Part_i và B.Part_i
+    Xác định đối tượng đang được đối chiếu
 
-1. **Giữ nguyên / gần nguyên văn:** nội dung A được đưa sang B gần trực tiếp.
-2. **Giữ ý nhưng chuyển hóa:** ý/fact đã có trong A nhưng được paraphrase, rút gọn, tổng hợp, đổi ngôi, chuyển dialogue thành narration hoặc biến đổi hình thức khác. Không tính trạng thái này là nội dung mới.
-3. **Nội dung mới thật sự:** fact, proposition, context, comparison, explanation hoặc significance trong B không tồn tại về mặt ngữ nghĩa trong A.
-4. **Nội dung bị loại:** ý/fact có trong A nhưng không được dùng trong B.
-
-`Reordering` là thuộc tính bổ sung của nội dung được giữ hoặc chuyển hóa, không phải trạng thái nội dung thứ năm. Một unit có thể vừa “giữ ý nhưng chuyển hóa” vừa “được chuyển vị trí”, nhưng không thể vì đổi cách diễn đạt mà trở thành “nội dung mới thật sự”.
-
-Chỉ áp dụng taxonomy này khi nó phục vụ đúng `criterion` và `requirement`. Không bắt criterion về syntax, tone, engagement hoặc khía cạnh khác phải báo cáo giữ/bỏ/new/reordering.
-
-#### Luật phân tích chung cho từng criterion
-
-Thực hiện lần lượt theo thứ tự trong payload:
-
-1. Đọc `criterion` và `requirement`; xác định câu hỏi riêng mà criterion đo, loại evidence liên quan và boundary với criteria khác.
-2. Kiểm tra criterion có áp dụng cho dataset hay không. Chỉ quan sát các biến liên quan trực tiếp; `requirement` quyết định phạm vi phân tích.
-3. Phân tích criterion riêng trên từng cặp áp dụng được trước khi tổng hợp cross-sample.
-4. So sánh các cặp để tìm phần ổn định, khoảng biến thiên, trigger làm pattern thay đổi, conditional variation và ngoại lệ có hệ thống.
-5. Khi evidence cho phép, rút ra các thành phần hữu ích: pattern chính; mức/range; priority; sequence; vị trí; trigger/điều kiện; decision rule; giới hạn; stop condition. Không ép mọi Result phải chứa tất cả thành phần này.
-6. Tổng quát hóa observation thành chỉ dẫn có thể thao tác trên Content A mới. Chỉ kết luận những gì evidence trong dataset hỗ trợ.
-7. Kiểm tra Result không trùng chức năng với Result của criterion khác và không suy diễn intention.
-8. Nếu criterion không áp dụng, pattern chỉ là hiện tượng đơn lẻ không tổng quát hóa được, hoặc evidence không đủ để tạo rule hữu ích, trả `result: ""`.
-
-Các nhóm criterion có phạm vi khác nhau. Ví dụ: coverage của A cần xét selection/omission; transformation cần xét cách material từ A được chuyển hóa; new-content criterion cần phân biệt bổ sung thật sự với paraphrase; sentence/syntax chỉ xét cấu trúc câu của narration; engagement chỉ xét mechanism quan sát được tạo engagement. Không kéo các biến ngoài phạm vi vào Result chỉ vì chúng xuất hiện trong dataset.
-
-#### Tổng hợp cross-sample
-
-Không biến hiện tượng chỉ xuất hiện ngẫu nhiên ở một sample thành rule chung. Với mỗi criterion:
-
-- xác định biểu hiện trong từng cặp áp dụng được;
-- tìm điểm lặp và phần ổn định;
-- ghi nhận range hoặc phần co giãn;
-- tìm đặc điểm trong A hoặc bối cảnh quan sát được làm pattern thay đổi;
-- giữ trigger trong Result nếu rule chỉ đúng có điều kiện;
-- coi ngoại lệ là có hệ thống chỉ khi dataset cho thấy điều kiện phân biệt hợp lý.
-
-Khi chỉ có một cặp hoặc bằng chứng ít, chỉ giữ rule nếu quan hệ A → B trực tiếp, rõ và có thể thao tác; không gọi một lựa chọn ngẫu nhiên là stable pattern. Hạ mức khẳng định bằng điều kiện/giới hạn hoặc để Result rỗng.
-
-#### Đơn vị đo
-
-Với tỷ lệ về nội dung, ưu tiên semantic fact, proposition hoặc idea unit:
-
-- tỷ lệ A được giữ dựa trên lượng ý/fact của A được giữ hoặc giữ ý nhưng chuyển hóa;
-- tỷ lệ nội dung mới trong B dựa trên lượng ý/fact mới thật sự trong B;
-- filler, lặp lời hoặc độ dài câu không được làm sai lệch kết luận về content retention.
-
-Chủ yếu dùng word count hoặc sentence count cho độ dài, pacing, sentence rhythm, source run và narration run. Chỉ nêu số hoặc range khi cách đo nhất quán và evidence đủ mạnh; nếu không, mô tả pattern định tính có giới hạn rõ.
-
-#### Chuẩn chất lượng Result
-
-Result nên tiến gần logic sau trong phạm vi evidence cho phép:
-
-`đặc điểm/trigger trong A → quyết định quan sát được → hành động chuyển đổi → mức độ/vị trí/thứ tự → điều kiện thay đổi → giới hạn hoặc điểm dừng`
-
-Không suy diễn mục đích, cảm xúc mong muốn hoặc trạng thái tinh thần của tác giả. Mô tả behavior quan sát được từ A ↔ B. Ví dụ, ưu tiên “đưa rarity trước valuation và để valuation ở cuối” hơn “muốn người xem tò mò”.
-
-Trước khi chấp nhận Result, tự kiểm tra: **Nếu một LLM khác nhận Result này cùng Content A mới, nó có biết phải quyết định hoặc làm gì không?** Những câu chung như “giữ fact quan trọng”, “mở rộng để hấp dẫn hơn”, “phần thân chi tiết” hoặc “giọng kể chuyên nghiệp” không đạt nếu thiếu tiêu chí chọn, hành động, vị trí, mức độ hoặc điều kiện có evidence.
-
-Không kể lại dài dòng từng segment, không tổ chức Result theo kiểu `A nói..., B nói..., Part 1..., Part 2...`, và không giữ facts riêng của dataset làm rule. Viết trực tiếp thành chỉ dẫn chuyển đổi cô đọng. Không bịa evidence, tỷ lệ hoặc certainty.
-
-#### Boundary và chống trùng giữa criteria
-
-Mỗi Result phải trả lời đúng chức năng riêng của criterion. Cùng một evidence có thể hỗ trợ nhiều criterion, nhưng góc kết luận phải khác theo boundary; không copy hoặc paraphrase gần giống một Result sang nhiều criterion. Ví dụ: criterion về nguồn chọn material trả lời “lấy từ đâu”; criterion về macro-structure trả lời “B được tổ chức thành các phần nào”; criterion về hierarchy/reordering trả lời “fact nào được ưu tiên và chuyển vị trí ra sao”. Nếu criterion không bổ sung DNA riêng hữu ích, để Result rỗng.
-
-#### Định dạng JSON
-
-Tạo đúng một object cho mọi criterion, kể cả khi Result rỗng, và giữ nguyên thứ tự cùng định danh từ payload:
-
-```json
-{
-  "schema_version": "1.0",
-  "results": [
-    {
-      "criterion_key": "Temp!2:C001",
-      "criterion_id": "C001",
-      "result": "Quy luật có thể thao tác cho criterion này."
-    }
-  ]
-}
+    FOR EACH CRITERION trong payload.criteria theo thứ tự:
+        Đọc Requirement và Analysis Instruction
+        Đối chiếu A→B theo yêu cầu và cách phân tích của criterion này
+        Chỉ dùng evidence của Part hiện tại
+        Tạo một Result riêng cho criterion này
+    END
+    Ghi đầy đủ Result của Part_i
+END
 ```
 
-Ghi document vào đường dẫn `analysis_results` trong config và tuân thủ [analysis_results.schema.json](schemas/analysis_results.schema.json). Không thêm field, không đổi thứ tự hoặc định danh criterion. Với criterion bị loại, dùng chính xác chuỗi rỗng; không ghi lý do, `Không áp dụng`, placeholder hoặc trạng thái `KEEP/DROP` vào `result`.
+`Requirement` xác định câu hỏi và phạm vi; `Analysis Instruction` hướng dẫn cách phân tích. Nếu instruction trống, dùng Requirement. Chỉ phân đoạn, mapping, phân loại hoặc đo khi criterion cần; không áp một framework chung cho mọi criterion.
 
-### 3. FINALIZE — Python ghi Excel
+Khi criterion cần phân đoạn, `A01`, `B01` là đoạn/cụm ý bên trong Part hiện tại, không phải Part mới; chia theo chức năng hoặc hướng nội dung, không theo xuống dòng/timestamp. Khi xét phần bổ sung, đối chiếu toàn bộ A.Part hiện tại để tránh coi paraphrase hoặc nén source là nội dung mới. Khi đo, nêu phương pháp và phạm vi, loại marker/timestamp khỏi nội dung; không suy ra tốc độ đọc từ timestamp.
 
-Chạy:
+Mỗi Result trả lời đúng criterion của nó. Evidence có thể dùng lại trong cùng Part nhưng góc phân tích phải khác; không sao chép một Result cho nhiều criteria.
+
+## 3. WRITE RESULT
+
+Result mô tả cô đọng **cách xử lý A→B quan sát được trên đối tượng hiện tại**, trả lời trực tiếp Requirement theo Analysis Instruction. Không kể lại toàn bộ transcript hoặc chuyển quan sát thành hướng dẫn áp dụng cho đối tượng mới.
+
+Dùng chi tiết hoặc trích dẫn ngắn của cặp hiện tại khi cần làm rõ evidence. Không suy diễn ý định tác giả hoặc tổng quát hóa từ một mẫu; số liệu chỉ mô tả Part đang phân tích.
+
+**Chỉ để Result rỗng khi criterion thực sự không thể đánh giá từ cặp A/B hoặc evidence không đủ để kết luận: ghi chính xác `result: ""`.** Việc một nội dung bị loại bỏ, không được mở rộng hoặc không được giữ lại vẫn có thể là evidence hợp lệ nếu criterion đang phân tích chính hành vi đó. Ví dụ với C220, A có một loại nội dung nhưng B loại bỏ toàn bộ thì ghi nhận hành vi loại bỏ, không để Result rỗng.
+
+Không bịa kết quả để mọi ô đều có nội dung. Với Result rỗng, không điền lý do, `Không áp dụng` hoặc placeholder; vẫn giữ criterion và dòng Excel tương ứng.
+
+Result chỉ chứa kết luận phân tích của criterion; không ghi lại quy trình đo, mapping, kiểm tra, phân đoạn hoặc các bước suy luận đã dùng để đi đến kết luận. Số liệu cần thiết cho criterion vẫn được phép ghi.
+
+Ghi JSON vào `analysis_results` trong config theo [analysis_results.schema.json](schemas/analysis_results.schema.json), dùng metadata và định danh từ payload đã prepare. Một JSON chung chứa các Part; mỗi Part có đầy đủ Result theo thứ tự criteria trong master.
+ Phân tích hoàn chỉnh từng Part theo thứ tự và lưu kết quả vào đúng object của Part đó trong một analysis_results duy nhất. Không tạo JSON riêng cho từng Part hoặc artifact phụ. 
+ 
+## 4. EXPORT
 
 ```powershell
-python .agents/skills/analyze-content-pair/scripts/excel_bridge.py finalize --config .agents/skills/analyze-content-pair/config.yaml
+python .agents/skills/analyze-content-pair/scripts/excel_bridge.py finalize --config .agents/skills/analyze-content-pair/config.yaml --overwrite
 ```
 
-Python kiểm tra document có đúng `schema_version` và `results`; đủ đúng một object cho mỗi criterion; không có field lạ, khóa lạ hoặc trùng; `criterion_key`, `criterion_id`, sheet và row vẫn khớp workbook; mọi `result` là chuỗi; và payload chưa lỗi thời.
+Python kiểm tra kết quả và xuất workbook tại `output` trong config. Nếu kiểm tra lỗi, xử lý lỗi trước khi export; không coi file kết quả là đã hoàn thành.
 
-Nếu validation thất bại, không tạo hoặc thay thế output. Nếu đạt, Python trim Result, loại criteria có Result rỗng và tạo workbook `output/result_analysis.xlsx` mới. Workbook chỉ chứa các cột `ID`, `Nhóm`, `Tiêu chí`, `Requirement`, `Result`, theo thứ tự tương đối trong `DEFAULT_CRITERIA.xlsx`.
+Mỗi sheet mang Part ID (`Part1`, `Part2`, …), theo thứ tự số Part, có đúng năm cột:
+
+`ID | Nhóm | Tiêu chí | Requirement | Result`
+
+Giữ đầy đủ tất cả criteria theo đúng thứ tự master trên từng sheet, kể cả khi Result rỗng. Chuỗi rỗng thành ô Excel trống. Không thêm sheet tổng hợp, cột frequency hoặc `Analysis Instruction` vào workbook.
+
+Mỗi lần thực thi, tạo lại toàn bộ workbook tại cùng đường dẫn `output` trong config. Các sheet cũ được loại bỏ; mỗi Part hiện tại được tạo thành một sheet mới với đầy đủ kết quả của lần chạy này. Không ghi chồng dữ liệu lên sheet cũ, không nối thêm sheet vào kết quả cũ và không tạo file phiên bản mới. Chỉ thay thế file result sau khi kết quả mới được kiểm tra và export thành công; nếu lần chạy lỗi, giữ nguyên file result cũ.
 
 ## Điều kiện hoàn thành
 
-- Đúng một result object cho mọi criterion; Result rỗng khi không có rule riêng, đáng tin cậy và tái sử dụng được.
-- Mọi Result có nội dung trả lời cách tác giả triển khai đúng criterion khi biến A thành B và giúp ra quyết định trên A mới.
-- Paraphrase/chuyển hóa không bị tính là nội dung mới; reordering chỉ là thuộc tính bổ sung.
-- Kết luận cross-sample giữ stable pattern, conditional variation, trigger và range khi có evidence.
-- Không dùng knowledge ngoài dataset, không suy diễn intention và không trùng Result giữa criteria.
-- Output chỉ chứa criteria có Result khác rỗng, đúng thứ tự và đúng năm cột.
-- Workbook criteria và hai Content nguồn không bị sửa.
-- Không tạo `AUTHOR_SKILL` hoặc AUTHOR DNA cuối cùng.
+- Mỗi cặp Part tạo đúng một sheet và có đầy đủ criteria theo thứ tự master.
+- Mỗi Result trả lời criterion trên cặp hiện tại theo Requirement và Analysis Instruction; hành vi loại bỏ hoặc không mở rộng được ghi nhận khi có đủ evidence.
+- Chỉ để Result rỗng khi không thể đánh giá hoặc không đủ evidence; giữ nguyên dòng criterion.
+- JSON hợp lệ; workbook đúng năm cột, chỉ chứa các sheet của lần chạy hiện tại và đã export thành công tại cùng đường dẫn output.
+- Raw inputs giữ nguyên; không dùng nguồn ngoài, tổng hợp xuyên Part hoặc tạo AUTHOR_SKILL.
+- Không tạo thêm script, helper file, utility hoặc workflow trung gian ngoài flow đã định nghĩa.

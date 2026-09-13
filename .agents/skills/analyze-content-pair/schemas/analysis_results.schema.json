@@ -1,22 +1,36 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "analysis_results.schema.json",
-  "title": "Analyze Content Pair Results",
+  "title": "Independent Content Part Analyses",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "results"],
+  "required": ["schema_version", "payload_digest", "parts"],
   "properties": {
-    "schema_version": {"const": "1.0"},
-    "results": {
+    "schema_version": {"const": "3.0"},
+    "payload_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "parts": {
       "type": "array",
+      "minItems": 1,
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["criterion_key", "criterion_id", "result"],
+        "required": ["part_id", "results"],
         "properties": {
-          "criterion_key": {"type": "string", "minLength": 1},
-          "criterion_id": {"type": "string", "minLength": 1},
-          "result": {"type": "string"}
+          "part_id": {"type": "string", "pattern": "^Part[1-9][0-9]*$", "maxLength": 31},
+          "results": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["criterion_key", "criterion_id", "result"],
+              "properties": {
+                "criterion_key": {"type": "string", "minLength": 1},
+                "criterion_id": {"type": "string", "minLength": 1},
+                "result": {"type": "string", "maxLength": 32767}
+              }
+            }
+          }
         }
       }
     }
